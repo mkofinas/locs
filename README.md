@@ -9,4 +9,4 @@ NeurIPS 2021
 
 Code will be released soon!
 
-![LoCS](img/local_coordinate_frames.png)
+![LoCS](assets/img/local_coordinate_frames.png)
