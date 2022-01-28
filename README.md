@@ -16,7 +16,7 @@ We propose local coordinate frames for all objects in the <em>geometric
 graph</em> of an interacting dynamical system. Each local coordinate frame is
 centered at the position of the target object and rotated such that it matches
 the object's orientation. Our method, termed **LoCS** (**Lo**cal **C**oordinate
-Frame*S*), can be added to any **graph network** that takes as inputs nodes
+Frame**S**), can be added to any **graph network** that takes as inputs nodes
 <em>positioned in space</em>, and <em>evolving through time</em>.
 
 ## Install
