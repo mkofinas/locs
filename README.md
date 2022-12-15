@@ -10,9 +10,13 @@ Official source code for
 
 ![LoCS](assets/img/local_coordinate_frames.png)
 
+Local frames construction demo:
 [![Jupyter](https://img.shields.io/static/v1.svg?logo=jupyter&label=Jupyter&message=View%20On%20Github&color=lightgreen)](demo_local_frames_construction.ipynb)
-
 [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mkofinas/locs/blob/main/demo_local_frames_construction.ipynb)
+
+LoCS GNN demo:
+[![Jupyter](https://img.shields.io/static/v1.svg?logo=jupyter&label=Jupyter&message=View%20On%20Github&color=lightgreen)](demo.ipynb)
+[![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mkofinas/locs/blob/main/demo.ipynb)
 
 ### TL;DR
 
@@ -24,6 +28,8 @@ Frame**S**), can be added to any **graph network** that takes as inputs nodes
 <em>positioned in space</em>, and <em>evolving through time</em>.
 
 ## Install
+
+#### Option #1
 
 The source code is written in Pytorch and uses PyTorch Geometric.
 
@@ -38,6 +44,8 @@ Then, install the project by running:
 pip install -e .
 ```
 
+#### Option #2
+
 Alternatively, you can use the `install.sh` script to install the environment.
 
 ```sh
@@ -45,7 +53,7 @@ Alternatively, you can use the `install.sh` script to install the environment.
 ```
 
 The script installs all dependencies one by one. Please mind that the script
-might install different versions of the dependencies.
+might install different versions of some secondary dependencies.
 
 #### Attribution
 
