@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-import kornia
 
 
 def cart2spherical(x):
@@ -49,7 +48,3 @@ def quat2euler(q):
         torch.asin(torch.clamp(2 * (q0 * q2 - q3 * q1), min=-1.0, max=1.0)),
         torch.atan2(2 * (q0 * q1 + q2 * q3), 1 - 2 * (q1 ** 2 + q2 ** 2)),
     ], -1)
-
-
-def rotation_matrix_to_euler(r):
-    return quat2euler(kornia.conversions.rotation_matrix_to_quaternion(r))

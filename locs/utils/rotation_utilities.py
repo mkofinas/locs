@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-from pytorch3d.transforms.rotation_conversions import matrix_to_euler_angles
 
 from locs.utils import spherical_coordinates, polar_coordinates
 
@@ -24,7 +23,6 @@ def canonicalize_inputs(inputs, use_3d=False, trans_only=False):
             canon_inputs[..., 3:] = vel
         else:
             vel = inputs[..., 3:]
-            # Rinv = kornia.angle_axis_to_rotation_matrix(vel.reshape(-1, 3)).reshape(*vel.shape[:-1], 3, 3)
 
             _, phi, theta = spherical_coordinates.cart2spherical(vel)
             r = spherical_coordinates.R_sph(phi, theta)
@@ -153,7 +151,7 @@ def create_trans_3d_edge_attr_pos_vel(x, send_edges, recv_edges, batched=False):
     node_distance, _, _ = spherical_coordinates.cart2spherical(send_embed[..., :3] - recv_embed[..., :3])
 
     send_r = spherical_coordinates.R_sph(send_yaw, send_pitch)
-    euler_angles = matrix_to_euler_angles(send_r, 'ZYX')
+    euler_angles = rotation_matrix_to_euler(send_r)
 
     relative_positions = send_embed[..., :3] - recv_embed[..., :3]
     velocities = send_embed[..., 3:]
@@ -175,7 +173,6 @@ def create_trans_3d_edge_attr_pos_vel(x, send_edges, recv_edges, batched=False):
 def create_3d_edge_attr_pos_vel(x, send_edges, recv_edges, batched=False):
     send_embed, recv_embed = sender_receiver_features(
         x, send_edges, recv_edges, batched=batched)
-    # r = kornia.angle_axis_to_rotation_matrix(recv_embed[..., 3:].view(-1, 3)).reshape(*recv_embed.shape[:-1], 3, 3)
 
     _, send_yaw, send_pitch = spherical_coordinates.cart2spherical(send_embed[..., 3:])
     _, recv_yaw, recv_pitch = spherical_coordinates.cart2spherical(recv_embed[..., 3:])
@@ -184,7 +181,7 @@ def create_3d_edge_attr_pos_vel(x, send_edges, recv_edges, batched=False):
     node_distance, _, _ = spherical_coordinates.cart2spherical(send_embed[..., :3] - recv_embed[..., :3])
 
     send_r = spherical_coordinates.R_sph(send_yaw, send_pitch)
-    rotated_euler = matrix_to_euler_angles(r @ send_r, 'ZYX')
+    rotated_euler = rotation_matrix_to_euler(r @ send_r)
 
     rotated_relative_positions = (r @ (send_embed[..., :3] - recv_embed[..., :3]).unsqueeze(-1)).squeeze(-1)
     rotated_velocities = (r @ send_embed[..., 3:].unsqueeze(-1)).squeeze(-1)
@@ -215,3 +212,24 @@ def angle_diff(v1, v2):
     delta_angle[delta_angle < -np.pi] += 2 * np.pi
     delta_angle = delta_angle / np.pi
     return delta_angle
+
+
+def rotation_matrix_to_euler(R):
+    """Convert a 3D rotation matrix to Euler angles.
+
+    R shape: (..., 3, 3)
+
+    Follow ZYX convention
+    Functionally identical to matrix_to_euler_angles(R, 'ZYX') from PyTorch3D
+
+    ```py
+    from pytorch3d.transforms.rotation_conversions import matrix_to_euler_angles
+    euler = matrix_to_euler_angles(R, 'ZYX')
+    ```
+    """
+    euler = torch.stack([
+        torch.atan2(R[..., 1, 0], R[..., 0, 0]),
+        torch.asin(-R[..., 2, 0]),
+        torch.atan2(R[..., 2, 1], R[..., 2, 2]),
+    ], -1)
+    return euler

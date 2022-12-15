@@ -1,8 +1,6 @@
 name: locs
 channels:
-  - pytorch3d
   - pyg
-  - iopath
   - defaults
   - conda-forge
   - pytorch
@@ -34,7 +32,6 @@ dependencies:
   - ffmpeg=4.4.1=h6987444_0
   - freetype=2.11.0=h70c0345_0
   - frozenlist=1.2.0=py39h7f8727e_0
-  - fvcore=0.1.5.post20211023=pyhd8ed1ab_0
   - giflib=5.2.1=h7b6447c_0
   - gmp=6.2.1=h2531618_2
   - gnutls=3.6.15=he1e5248_0
@@ -52,7 +49,6 @@ dependencies:
   - joblib=1.1.0=pyhd8ed1ab_0
   - jpeg=9d=h7f8727e_0
   - kiwisolver=1.3.2=py39h1a9c180_1
-  - kornia=0.6.2=pyhd8ed1ab_0
   - lame=3.100=h7b6447c_0
   - lcms2=2.12=h3be6417_0
   - ld_impl_linux-64=2.36.1=hea4e1c9_2
@@ -125,11 +121,9 @@ dependencies:
   - pytorch-scatter=2.0.9=py39_torch_1.10.0_cu102
   - pytorch-sparse=0.6.12=py39_torch_1.10.0_cu102
   - pytorch-spline-conv=1.2.1=py39_torch_1.10.0_cu102
-  - pytorch3d=0.6.1=py39_cu102_pyt1100
   - pytz=2021.3=pyhd8ed1ab_0
   - pyu2f=0.1.5=pyhd8ed1ab_0
   - pyyaml=6.0=py39h3811e60_3
-  - readline=8.1.2=h7f8727e_0
   - requests=2.27.1=pyhd8ed1ab_0
   - requests-oauthlib=1.3.0=py_0
   - rsa=4.8=pyhd8ed1ab_0
