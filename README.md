@@ -10,11 +10,11 @@ Official source code for
 
 ![LoCS](assets/img/local_coordinate_frames.png)
 
-Local frames construction demo:
+__Local frames construction demo:__
 [![Jupyter](https://img.shields.io/static/v1.svg?logo=jupyter&label=Jupyter&message=View%20On%20Github&color=lightgreen)](demo_local_frames_construction.ipynb)
 [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mkofinas/locs/blob/main/demo_local_frames_construction.ipynb)
 
-LoCS GNN demo:
+__LoCS GNN demo:__
 [![Jupyter](https://img.shields.io/static/v1.svg?logo=jupyter&label=Jupyter&message=View%20On%20Github&color=lightgreen)](demo.ipynb)
 [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mkofinas/locs/blob/main/demo.ipynb)
 
