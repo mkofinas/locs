@@ -390,7 +390,7 @@ class RecurrentGNN(nn.Module):
             nn.ReLU(),
         )
 
-        self.res_mlp =  = nn.Sequential(
+        self.res_mlp = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
             nn.Dropout(p=self.dropout_prob),
