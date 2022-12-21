@@ -1,8 +1,18 @@
+import os
+import random
+
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
 from torch_geometric.nn import MessagePassing
 from torch_scatter import scatter
+
+
+"""
+Geometric primitives, rotations, cartesian to spherical
+"""
 
 
 def rotation_matrix(ndim, theta, phi=None, psi=None, /):
@@ -85,6 +95,11 @@ def rotation_matrix_to_euler(R, num_dims, normalize=True):
 
 def rotate(x, R):
     return torch.einsum('...ij,...j->...i', R, x)
+
+
+"""
+Transformation from global to local coordinates and vice versa
+"""
 
 
 class Localizer(nn.Module):
@@ -175,6 +190,11 @@ class Globalizer(nn.Module):
         return torch.cat(
             [rotate(x[..., :self.num_dims], R),
              rotate(x[..., self.num_dims:], R)], -1)
+
+
+"""
+LoCS Neural Network
+"""
 
 
 class FullyConnectedLoCS(nn.Module):
@@ -454,6 +474,11 @@ class RecurrentGNN(nn.Module):
         return pred, hidden
 
 
+"""
+PyTorch Geometric LoCS implementation
+"""
+
+
 class PyGNetwork(MessagePassing):
     def __init__(self, params):
         super().__init__(aggr='mean')
@@ -523,3 +548,112 @@ class PyGNetwork(MessagePassing):
     def forward(self, inputs, hidden):
         outputs = self._forward(inputs)
         return outputs, None
+
+
+"""
+Functions to train and evaluate the model
+"""
+
+
+def set_random_seeds(seed_val):
+    np.random.seed(seed_val)
+    torch.manual_seed(seed_val)
+    random.seed(seed_val)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed_val)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
+def train(model, train_data, val_data, params):
+    gpu = params.get('gpu', False)
+    batch_size = params.get('batch_size', 1000)
+    val_batch_size = params.get('val_batch_size', batch_size)
+    num_epochs = params.get('num_epochs', 100)
+    continue_training = params.get('continue_training', False)
+    train_data_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
+    val_data_loader = DataLoader(val_data, batch_size=val_batch_size)
+
+    model_params = [param for param in model.parameters() if param.requires_grad]
+    opt = torch.optim.Adam(model_params, lr=params['lr'])
+
+    working_dir = params['working_dir']
+    best_path = os.path.join(working_dir, 'best_model')
+    checkpoint_dir = os.path.join(working_dir, 'model_checkpoint')
+    training_path = os.path.join(working_dir, 'training_checkpoint')
+    if continue_training:
+        print("RESUMING TRAINING")
+        model.load(checkpoint_dir)
+        train_params = torch.load(training_path)
+        start_epoch = train_params['epoch']
+        opt.load_state_dict(train_params['optimizer'])
+        best_val_result = train_params['best_val_result']
+        best_val_epoch = train_params['best_val_epoch']
+        print("STARTING EPOCH: ", start_epoch)
+    else:
+        start_epoch = 1
+        best_val_epoch = -1
+        best_val_result = float('inf')
+
+    set_random_seeds(1)
+    for epoch in range(start_epoch, num_epochs+1):
+        print("EPOCH", epoch)
+        model.train()
+        for batch in train_data_loader:
+            inputs = batch['inputs']
+            if gpu:
+                inputs = inputs.cuda(non_blocking=True)
+            loss, _ = model.calculate_loss(inputs)
+            loss.backward()
+            opt.step()
+            opt.zero_grad()
+
+        model.eval()
+        total_loss = 0
+        with torch.no_grad():
+            for batch in val_data_loader:
+                inputs = batch['inputs']
+                if gpu:
+                    inputs = inputs.cuda(non_blocking=True)
+                loss, loss_nll = model.calculate_loss(inputs)
+                total_loss += loss_nll.sum().item()
+        total_loss /= len(val_data)
+
+        if total_loss < best_val_result:
+            best_val_epoch = epoch
+            best_val_result = total_loss
+            print("BEST VAL RESULT. SAVING MODEL...")
+            model.save(best_path)
+        model.save(checkpoint_dir)
+        torch.save({
+                    'epoch': epoch+1,
+                    'optimizer': opt.state_dict(),
+                    'best_val_result': best_val_result,
+                    'best_val_epoch': best_val_epoch,
+                   }, training_path)
+        print(f"EPOCH {epoch} EVAL:")
+        print(f"\tCURRENT VAL LOSS: {total_loss}")
+        print(f"\tBEST VAL LOSS:    {best_val_result}")
+        print(f"\tBEST VAL EPOCH:   {best_val_epoch}")
+
+
+@torch.no_grad()
+def evaluate(model, dataset, burn_in_steps, forward_pred_steps, params):
+    gpu = params.get('gpu', False)
+    batch_size = params.get('batch_size', 1000)
+    data_loader = DataLoader(dataset, batch_size=batch_size, pin_memory=gpu)
+
+    model.eval()
+    total_se = 0
+    for batch in data_loader:
+        inputs = batch['inputs']
+        model_inputs = inputs[:, :burn_in_steps]
+        gt_predictions = inputs[:, burn_in_steps:burn_in_steps+forward_pred_steps]
+        if gpu:
+            model_inputs = model_inputs.cuda(non_blocking=True)
+        model_preds = model.predict_future(model_inputs, forward_pred_steps).cpu()
+        unnorm_model_preds = dataset.torch_unnormalize(model_preds)
+        unnorm_gt_predictions = dataset.torch_unnormalize(gt_predictions)
+
+        total_se += F.mse_loss(unnorm_model_preds, unnorm_gt_predictions, reduction='none').view(unnorm_model_preds.size(0), unnorm_model_preds.size(1), -1).mean(dim=-1).sum(dim=0)
+    return total_se / len(dataset)
