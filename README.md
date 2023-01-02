@@ -10,6 +10,8 @@ Official source code for
 
 ![LoCS](assets/img/local_coordinate_frames.png)
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7500066.svg)](https://doi.org/10.5281/zenodo.7500066)
+
 __Local frames construction demo:__
 [![Jupyter](https://img.shields.io/static/v1.svg?logo=jupyter&label=Jupyter&message=View%20On%20Github&color=lightgreen)](demo_local_frames_construction.ipynb)
 [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mkofinas/locs/blob/main/demo_local_frames_construction.ipynb)
@@ -66,8 +68,7 @@ This codebase is based on the code from the papers:
 - __Synth__: this code includes the synthetic data, as well as code used to generate it.
 - __Motion Capture__: the datasets can be downloaded from http://mocap.cs.cmu.edu/search.php?subjectnumber=35. For subject 35, you need trials 1-16 and 28-34.
 - __InD__: Data must be requested from here: https://www.ind-dataset.com/
-- __Charged Particles__: The dataset can be temporarily downloaded from https://drive.google.com/file/d/1oYzC-zCYAFSSxSDkrwADcH5eHsZXgMf9/view?usp=sharing. In the
-  future, this link will be replaced with a permanent one, and the source code
+- __Charged Particles__: The dataset can be downloaded from https://doi.org/10.5281/zenodo.7500066. Eventually, the source code
   to generate the data will be added to the repository.
 
 ## Experiments
