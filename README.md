@@ -10,7 +10,8 @@ Official source code for
 
 ![LoCS](assets/img/local_coordinate_frames.png)
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7500066.svg)](https://doi.org/10.5281/zenodo.7500066)
+[![arXiv](https://img.shields.io/badge/arXiv-2110.14961-b31b1b.svg?logo=arxiv)](https://arxiv.org/abs/2110.14961)
+[![3D Charged Particles Dataset](https://img.shields.io/badge/Zenodo-3D%20Charged%20Particles%20Dataset-blue?logo=zenodo)](https://doi.org/10.5281/zenodo.7500066)
 
 __Local frames construction demo:__
 [![Jupyter](https://img.shields.io/static/v1.svg?logo=jupyter&label=Jupyter&message=View%20On%20Github&color=lightgreen)](demo_local_frames_construction.ipynb)
