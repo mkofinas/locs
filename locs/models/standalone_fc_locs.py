@@ -103,18 +103,9 @@ Transformation from global to local coordinates and vice versa
 
 
 class Localizer(nn.Module):
-    def __init__(self, num_objects: int, num_dims: int = 2):
+    def __init__(self, num_dims: int = 2):
         super().__init__()
-        self.num_objects = num_objects
-        self.send_edges, self.recv_edges = torch.where(
-            ~torch.eye(self.num_objects, dtype=bool))
-
         self.num_dims = num_dims
-
-        self.num_orientations = self.num_dims * (self.num_dims - 1) // 2
-        # Relative features include: positions, orientations, positions in
-        # spherical coordinates, and velocities
-        self.num_relative_features = 3 * self.num_dims + self.num_orientations
 
     def set_edge_index(self, send_edges, recv_edges):
         self.send_edges = send_edges
@@ -127,10 +118,7 @@ class Localizer(nn.Module):
         return x_j, x_i
 
     def canonicalize_inputs(self, inputs):
-        if inputs.size(-1) != 2 * self.num_dims:
-            raise NotImplementedError
-
-        vel = inputs[..., self.num_dims:]
+        vel = inputs[..., self.num_dims:2*self.num_dims]
         R = velocity_to_rotation_matrix(vel)
         Rinv = R.transpose(-1, -2)
 
@@ -143,7 +131,7 @@ class Localizer(nn.Module):
         x_j, x_i = self.sender_receiver_features(x)
 
         # We approximate orientations via the velocity vector
-        R = velocity_to_rotation_matrix(x_i[..., self.num_dims:])
+        R = velocity_to_rotation_matrix(x_i[..., self.num_dims:2*self.num_dims])
         R_inv = R.transpose(-1, -2)
 
         # Positions
@@ -151,7 +139,7 @@ class Localizer(nn.Module):
         rotated_relative_positions = rotate(relative_positions, R_inv)
 
         # Orientations
-        send_R = velocity_to_rotation_matrix(x_j[..., self.num_dims:])
+        send_R = velocity_to_rotation_matrix(x_j[..., self.num_dims:2*self.num_dims])
         rotated_orientations = R_inv @ send_R
         rotated_euler = rotation_matrix_to_euler(rotated_orientations, self.num_dims)
 
@@ -161,7 +149,7 @@ class Localizer(nn.Module):
             cart_to_n_spherical(rotated_relative_positions, symmetric_theta=True)[1:], -1)
 
         # Velocities
-        rotated_velocities = rotate(x_j[..., self.num_dims:], R_inv)
+        rotated_velocities = rotate(x_j[..., self.num_dims:2*self.num_dims], R_inv)
 
         edge_attr = torch.cat([
             rotated_relative_positions,
@@ -172,7 +160,8 @@ class Localizer(nn.Module):
         ], -1)
         return edge_attr
 
-    def forward(self, x):
+    def forward(self, x, edges):
+        self.set_edge_index(*edges)
         rel_feat, R = self.canonicalize_inputs(x)
         edge_attr = self.create_edge_attr(x)
 
@@ -188,8 +177,7 @@ class Globalizer(nn.Module):
 
     def forward(self, x, R):
         return torch.cat(
-            [rotate(x[..., :self.num_dims], R),
-             rotate(x[..., self.num_dims:], R)], -1)
+            [rotate(xi, R) for xi in x.split(self.num_dims, dim=-1)], -1)
 
 
 """
@@ -209,6 +197,9 @@ class FullyConnectedLoCS(nn.Module):
         self.prior_variance = params.get('prior_variance')
         self.kl_coef = 1.0
 
+        self.num_objects = params['num_vars']
+        self.edges = torch.where(~torch.eye(self.num_objects, dtype=bool))
+
     def calculate_loss(self, inputs, return_logits=False):
         network_hidden = self.network.get_initial_hidden(inputs)
         num_time_steps = inputs.size(1)
@@ -217,7 +208,8 @@ class FullyConnectedLoCS(nn.Module):
         # We train using teacher forcing
         for step in range(num_time_steps-1):
             current_inputs = inputs[:, step]
-            predictions, network_hidden = self.network(current_inputs, network_hidden)
+            predictions, network_hidden = self.network(
+                current_inputs, self.edges, network_hidden)
             all_predictions.append(predictions)
         all_predictions = torch.stack(all_predictions, dim=1)
         target = inputs[:, 1:, :, :]
@@ -235,12 +227,14 @@ class FullyConnectedLoCS(nn.Module):
         all_predictions = []
         for step in range(burn_in_timesteps-1):
             current_inputs = inputs[:, step]
-            predictions, network_hidden = self.network(current_inputs, network_hidden)
+            predictions, network_hidden = self.network(
+                current_inputs, self.edges, network_hidden)
             if return_everything:
                 all_predictions.append(predictions)
         predictions = inputs[:, burn_in_timesteps-1]
         for step in range(prediction_steps):
-            predictions, network_hidden = self.network(predictions, network_hidden)
+            predictions, network_hidden = self.network(
+                predictions, self.edges, network_hidden)
             all_predictions.append(predictions)
 
         predictions = torch.stack(all_predictions, dim=1)
@@ -265,20 +259,22 @@ class FullyConnectedLoCS(nn.Module):
 class MarkovNetwork(nn.Module):
     def __init__(self, params):
         super().__init__()
-        self.gnn = GNN(params)
-        self.localizer = Localizer(params['num_vars'], params['num_dims'])
+        self.num_dims = 3 if params.get('use_3d', False) else 2
+        self.gnn = GNN(params['input_size'], params['decoder_hidden'],
+                       params['decoder_dropout'], self.num_dims)
+        self.localizer = Localizer(params['num_dims'])
         self.globalizer = Globalizer(params['num_dims'])
 
     def get_initial_hidden(self, inputs):
         return None
 
-    def _forward(self, inputs):
+    def _forward(self, inputs, edges):
         """inputs shape: [batch_size, num_objects, input_size]"""
         # Global to Local
-        rel_feat, Rinv, edge_attr, _ = self.localizer(inputs)
+        rel_feat, Rinv, edge_attr = self.localizer(inputs, edges)
 
         # GNN
-        pred = self.gnn(rel_feat, edge_attr)
+        pred = self.gnn(rel_feat, edge_attr, edges)
 
         # Local to Global
         pred = self.globalizer(pred, Rinv)
@@ -287,30 +283,27 @@ class MarkovNetwork(nn.Module):
         outputs = inputs + pred
         return outputs
 
-    def forward(self, inputs, hidden):
-        outputs = self._forward(inputs)
+    def forward(self, inputs, edges, hidden):
+        outputs = self._forward(inputs, edges)
         return outputs, None
 
 
 class GNN(nn.Module):
-    def __init__(self, params):
+    def __init__(self, input_size, hidden_size, dropout_prob, num_dims):
         super().__init__()
-        self.num_objects = params['num_vars']
-        input_size = params['input_size']
-        hidden_size = params['decoder_hidden']
+        self.num_dims = num_dims
         out_size = input_size
 
-        dropout_prob = params['decoder_dropout']
+        self.num_orientations = self.num_dims * (self.num_dims - 1) // 2
+        # Relative features include: positions, orientations, positions in
+        # spherical coordinates, and velocities
+        self.num_relative_features = 3 * self.num_dims + self.num_orientations
 
-        self.send_edges, self.recv_edges = torch.where(
-            ~torch.eye(self.num_objects, dtype=bool))
-
-        self.use_3d = params.get('use_3d', False)
-        self.num_relative_features = 12 if self.use_3d else 7
+        num_edge_features = self.num_relative_features + input_size
 
         # Neural Network Layers
         self.edge_filter = nn.Sequential(
-            nn.Linear(self.num_relative_features+input_size, hidden_size),
+            nn.Linear(num_edge_features, hidden_size),
             nn.SiLU(),
             nn.Linear(hidden_size, hidden_size),
         )
@@ -327,7 +320,7 @@ class GNN(nn.Module):
             nn.Linear(hidden_size, out_size),
         )
 
-    def forward(self, inputs, edge_attr):
+    def forward(self, inputs, edge_attr, edges):
         """
         inputs shape: [batch_size, num_objects, input_size]
         """
@@ -335,7 +328,7 @@ class GNN(nn.Module):
         edge_attr = self.edge_filter(edge_attr)
         # Aggregate all msgs to receiver
         agg_msgs = scatter(
-            edge_attr, self.recv_edges.to(inputs.device), dim=1,
+            edge_attr, edges[1].to(inputs.device), dim=1,
             reduce='mean').contiguous()
 
         # Skip connection
@@ -350,9 +343,12 @@ class RecurrentNetwork(nn.Module):
     def __init__(self, params):
         super().__init__()
         self.hidden_size = params['decoder_hidden']
+        self.num_dims = 3 if params.get('use_3d', False) else 2
+        self.gnn = RecurrentGNN(
+            params['input_size'], self.hidden_size,
+            params['decoder_dropout'], self.num_dims)
 
-        self.gnn = RecurrentGNN(params)
-        self.localizer = Localizer(params['num_vars'], params['num_dims'])
+        self.localizer = Localizer(params['num_dims'])
         self.globalizer = Globalizer(params['num_dims'])
 
     def get_initial_hidden(self, inputs):
@@ -364,14 +360,14 @@ class RecurrentNetwork(nn.Module):
                 nn.init.xavier_normal_(m.weight.data)
                 m.bias.data.fill_(0.1)
 
-    def forward(self, inputs, hidden):
+    def forward(self, inputs, edges, hidden):
         """
         inputs size: [batch, num_objects, input_size]
         hidden size: [batch, num_objects, hidden_size]
         """
-        rel_feat, Rinv, edge_attr, _ = self.localizer(inputs)
+        rel_feat, Rinv, edge_attr = self.localizer(inputs, edges)
 
-        pred = self.gnn(rel_feat, edge_attr, hidden)
+        pred = self.gnn(rel_feat, edge_attr, edges, hidden)
 
         pred = self.globalizer(pred, Rinv)
 
@@ -380,32 +376,30 @@ class RecurrentNetwork(nn.Module):
 
 
 class RecurrentGNN(nn.Module):
-    def __init__(self, params):
+    def __init__(self, input_size, hidden_size, dropout_prob, num_dims):
         super().__init__()
-        self.num_objects = params['num_vars']
-        input_size = params['input_size']
-        hidden_size = params['decoder_hidden']
-        out_size = params['input_size']
-        self.dropout_prob = params['decoder_dropout']
+        self.num_dims = num_dims
+        out_size = input_size
 
-        self.send_edges, self.recv_edges = torch.where(
-            ~torch.eye(self.num_objects, dtype=bool))
+        self.num_orientations = self.num_dims * (self.num_dims - 1) // 2
+        # Relative features include: positions, orientations, positions in
+        # spherical coordinates, and velocities
+        self.num_relative_features = 3 * self.num_dims + self.num_orientations
 
-        self.use_3d = params.get('use_3d', False)
-        self.num_relative_features = 12 if self.use_3d else 7
+        num_edge_features = self.num_relative_features + input_size
 
         self.msg_mlp = nn.Sequential(
             nn.Linear(2*hidden_size, hidden_size),
             nn.Tanh(),
-            nn.Dropout(self.dropout_prob),
+            nn.Dropout(dropout_prob),
             nn.Linear(hidden_size, hidden_size),
             nn.Tanh(),
         )
 
         self.present_msg_mlp = nn.Sequential(
-            nn.Linear(self.num_relative_features+input_size, hidden_size),
+            nn.Linear(num_edge_features, hidden_size),
             nn.ReLU(),
-            nn.Dropout(p=self.dropout_prob),
+            nn.Dropout(p=dropout_prob),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
         )
@@ -413,7 +407,7 @@ class RecurrentGNN(nn.Module):
         self.res_mlp = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
-            nn.Dropout(p=self.dropout_prob),
+            nn.Dropout(p=dropout_prob),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
         )
@@ -429,10 +423,10 @@ class RecurrentGNN(nn.Module):
         self.out_mlp = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Dropout(p=self.dropout_prob),
+            nn.Dropout(p=dropout_prob),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Dropout(p=self.dropout_prob),
+            nn.Dropout(p=dropout_prob),
             nn.Linear(hidden_size, out_size),
         )
 
@@ -442,25 +436,26 @@ class RecurrentGNN(nn.Module):
                 nn.init.xavier_normal_(m.weight.data)
                 m.bias.data.fill_(0.1)
 
-    def forward(self, inputs, edge_attr, hidden):
+    def forward(self, inputs, edge_attr, edges, hidden):
         """
         inputs size: [batch, num_objects, input_size]
         edge_attr size: [batch, num_edges, num_edge_features]
         hidden size: [batch, num_objects, hidden_size]
         """
+        send_edges, recv_edges = edges
 
         # node2edge
-        receivers = hidden[:, self.recv_edges]
-        senders = hidden[:, self.send_edges]
+        receivers = hidden[:, recv_edges]
+        senders = hidden[:, send_edges]
 
         # hidden_messages: [batch, num_edges, 2 * hidden_size]
         hidden_messages = torch.cat([receivers, senders], dim=-1)
         hidden_messages = self.msg_mlp(hidden_messages)
-        hidden_node_emb = scatter(hidden_messages, self.recv_edges.cuda(), dim=1, reduce='mean').contiguous()
+        hidden_node_emb = scatter(hidden_messages, recv_edges.cuda(), dim=1, reduce='mean').contiguous()
 
         # Present messages
         present_messages = self.present_msg_mlp(edge_attr)
-        present_node_emb = scatter(present_messages, self.recv_edges.cuda(), dim=1, reduce='mean').contiguous()
+        present_node_emb = scatter(present_messages, recv_edges.cuda(), dim=1, reduce='mean').contiguous()
         present_node_emb = self.res_mlp(inputs) + present_node_emb
 
         # GRU-style gated aggregation
@@ -480,24 +475,21 @@ PyTorch Geometric LoCS implementation
 
 
 class PyGNetwork(MessagePassing):
-    def __init__(self, params):
+    def __init__(self, input_size, hidden_size, dropout_prob, num_dims):
         super().__init__(aggr='mean')
-        self.num_objects = params['num_vars']
-        input_size = params['input_size']
-        hidden_size = params['decoder_hidden']
+        self.num_dims = num_dims
         out_size = input_size
 
-        dropout_prob = params['decoder_dropout']
+        self.num_orientations = self.num_dims * (self.num_dims - 1) // 2
+        # Relative features include: positions, orientations, positions in
+        # spherical coordinates, and velocities
+        self.num_relative_features = 3 * self.num_dims + self.num_orientations
 
-        self.edge_index = torch.where(
-            ~torch.eye(self.num_objects, dtype=bool))
-
-        self.use_3d = params.get('use_3d', False)
-        self.num_relative_features = 12 if self.use_3d else 7
+        num_edge_features = self.num_relative_features + input_size
 
         # Neural Network Layers
         self.edge_filter = nn.Sequential(
-            nn.Linear(self.num_relative_features+input_size, hidden_size),
+            nn.Linear(num_edge_features, hidden_size),
             nn.SiLU(),
             nn.Linear(hidden_size, hidden_size),
         )
@@ -514,20 +506,20 @@ class PyGNetwork(MessagePassing):
             nn.Linear(hidden_size, out_size),
         )
 
-        self.localizer = Localizer(params['num_vars'], params['num_dims'])
-        self.globalizer = Globalizer(params['num_dims'])
+        self.localizer = Localizer(num_dims)
+        self.globalizer = Globalizer(num_dims)
 
     def get_initial_hidden(self, inputs):
         return None
 
-    def _forward(self, inputs):
+    def _forward(self, inputs, edges):
         """
         inputs shape: [batch_size, num_objects, input_size]
         """
         # Global to Local
-        rel_feat, Rinv, edge_attr, _ = self.localizer(inputs)
+        rel_feat, Rinv, edge_attr = self.localizer(inputs)
 
-        pred = self.propagate(self.edge_index, edge_attr=edge_attr)
+        pred = self.propagate(edges, edge_attr=edge_attr)
 
         pred = pred + self.res1(rel_feat)
 
@@ -545,8 +537,8 @@ class PyGNetwork(MessagePassing):
         edge_attr = self.edge_filter(edge_attr)
         return edge_attr
 
-    def forward(self, inputs, hidden):
-        outputs = self._forward(inputs)
+    def forward(self, inputs, edges, hidden):
+        outputs = self._forward(inputs, edges)
         return outputs, None
 
 
